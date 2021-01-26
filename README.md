@@ -6,4 +6,4 @@
 感谢大佬的项目：
 [sqw637/geetest_track](https://github.com/sqw637/geetest_track)
 # 许可证
-Apache 2.0
+Apache License 2.0
