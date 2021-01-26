@@ -1,0 +1,8 @@
+requests==2.20.0
+rsa==4.6
+pandas==1.1.1
+Flask==1.0
+numpy==1.19.1
+pycryptodome==3.9.9
+PyQt5==5.15.2
+PyQtWebEngine==5.15.2

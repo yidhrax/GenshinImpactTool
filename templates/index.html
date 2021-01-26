@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="shortcut icon" href="./static/f-log.png">
+    <title>原神</title>
+    <style>
+        body {
+            margin: 48px 0;
+            text-align: center;
+        }
+        #embed-captcha {
+            width: 300px;
+            margin: 0 auto;
+        }
+        .show {
+            display: block;
+            height: 30px;
+        }
+        .hide {
+            display: none;
+        }
+        .geetest_form p {
+            margin: 0 auto;
+            width: 510px;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+<script src="./static/jquery.min.js"></script>
+<script src="./static/gt.js"></script>
+<div class="popup">
+    <div id="embed-captcha"></div>
+    <p id="wait" class="show">正在加载验证码......</p>
+    <br>
+</div>
+
+<script>
+    function getClass(class_name) {
+        return document.getElementsByClassName(class_name)[0]
+    }
+    var track_list = []
+    var handlerEmbed = function (captchaObj) {
+        captchaObj.appendTo("#embed-captcha");
+        captchaObj.onReady(function () {
+            var script = document.createElement('script');
+            script.src = "./static/slide.7.7.1.js";
+            document.getElementsByTagName('head')[0].appendChild(script);
+            $("#wait")[0].className = "hide";
+        });
+        captchaObj.onSuccess(function () {
+            var result = captchaObj.getValidate();
+            console.log(result);
+            //loadG();
+              
+            $.ajax({
+                url: "/success",
+                type: "POST",
+                data:JSON.stringify(result),
+                contentType: 'application/json; charset=UTF-8',
+                success: function (data) {
+                    
+                }
+            });
+
+            document.getElementById("geetest_challenge").innerHTML = "geetest_challenge："+result.geetest_challenge;
+            document.getElementById("geetest_validate").innerHTML = "geetest_validate："+result.geetest_validate;
+            document.getElementById("geetest_seccode").innerHTML = "geetest_seccode："+result.geetest_seccode;
+        });
+        captchaObj.onError(function (error) {
+            console.log(error);
+            loadG();
+        });
+    };
+
+    function loadG(){
+        var success_class = getClass("geetest_holder geetest_wind geetest_radar_success");
+        if(success_class){
+            $("#wait")[0].className = "show";
+            success_class.remove();
+        };
+        
+        $.ajax({
+            url: "/mihoyo?t=" + (new Date()).getTime(),
+            type: "get",
+            dataType: "json",
+            success: function (data) {
+                initGeetest({
+                    gt: data.gt,
+                    challenge: data.challenge,
+                    product: "float",
+                    offline: !data.success,
+                    new_captcha: data.new_captcha,
+                    width: "300px",
+                }, handlerEmbed);
+            }
+        });
+    }
+    loadG();
+</script>
+<br><br>
+</body>
+<div id="content" style="margin-top: 20%;"></div>
+<div class="geetest_form">
+    <p id="geetest_challenge"></p>
+    <p id="geetest_validate"></p>
+    <p id="geetest_seccode"></p>
+</div>
+</html>
+
