@@ -6,5 +6,6 @@
 # 致谢
 感谢大佬的项目：
 [sqw637/geetest_track](https://github.com/sqw637/geetest_track)
+[y1ndan/genshin-impact-helper](https://github.com/y1ndan/genshin-impact-helper)
 # 许可证
 Apache License 2.0
