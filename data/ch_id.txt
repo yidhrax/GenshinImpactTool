@@ -12,7 +12,8 @@ id=10000024 name=北斗
 id=10000027 name=凝光
 id=10000036 name=重云
 id=10000044 name=辛焱
-id=10000007 name=旅行者
+id=10000007 name=荧
+id=10000005 name=空
 id=10000021 name=安柏
 id=10000039 name=迪奥娜
 id=10000003 name=琴
