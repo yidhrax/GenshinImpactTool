@@ -10,7 +10,7 @@ from threading import Thread
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5 as Cipher_pkcs1_v1_5
 from Crypto.Signature import PKCS1_v1_5 as Signature_pkcs1_v1_5
-from config import CONFIG
+from config import CONFIG,REFERER
 import requests
 import json
 import sqlite3
@@ -42,41 +42,30 @@ ERRCODE = {
     'GetCharsInfoFailed' : 2,
     'WrongPassword' : 3,
     'MissingData' : 4,
+    'Noaccountavailable' : 5,
 }
+
 MESSAGE = {
     'Success' : 0,
     'Run_out_of_times' : 1,
     'Data_not_public' : 2,
     'Not_logged_in' : 3
 }
-
-    
-def query(char):
-    cursor = conn.cursor()
-    sql = 'SELECT "{0}" from User'.format(char)
-    cursor = conn.execute(sql)
-    fates = [0, 0, 0, 0, 0, 0, 0]
-    for row in cursor:
-        if row[0] == None:
-            continue
-        i = eval(row[0])['fate']
-        fates[i] += 1
-    return fates
-
-def runapp():
-    app.secret_key = "www"
-    app.run()
+def get_url(name,*args):
+    url = CONFIG.URL[name].format(*args)
+    return url
 
 def get_mmt():
     t = time.time()
     t = int(round(t * 1000))
-    url = 'https://webapi.account.mihoyo.com/Api/create_mmt?scene_type=1&now={}&reason=bbs.mihoyo.com'.format(
-        t)
+    '''url = 'https://webapi.account.mihoyo.com/Api/create_mmt?scene_type=1&now={}&reason=bbs.mihoyo.com'.format(
+        t)'''
+    url = get_url('mmt_url', t)
     proxy = getproxy()
     g = requests.get(url, headers='', proxies=proxy, verify=False, timeout=2)
     return g.json()
 
-def hexdigest( text):
+def hexdigest(text):
     md5 = hashlib.md5()
     md5.update(text.encode())
     return md5.hexdigest()
@@ -98,12 +87,11 @@ def get_headers(cookie='', referer='', type_=None):
                 'x-rpc-app_version': CONFIG.APP_VERSION,
                 'DS': get_ds(),
                 'User-Agent': CONFIG.USER_AGENT,
-                'Referer': referer, #'https://webstatic.mihoyo.com/', 
+                'Referer': referer, 
                 'Accept-Encoding': 'gzip, deflate, br',
                 'Cookie': cookie
                 }
         elif type_ == 'login':
-            
             header = {
             'Host': 'webapi.account.mihoyo.com',
             'Connection': 'keep-alive',
@@ -120,7 +108,6 @@ def get_headers(cookie='', referer='', type_=None):
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
             'Cookie': '_ga=GA1.2.315542037.1607442735; UM_distinctid=176430da7561cd-0f9974eb924088-5a301348-144000-176430da75731c; mi18nLang=zh-cn; _gid=GA1.2.153888793.1610692678',
             }
-            
         return header
 
 def getproxy():
@@ -134,11 +121,14 @@ def getproxy():
         proxy['https'] = p
     return proxy
 
-
 class MyError(Exception):
     '''errcode:
-    0: success
-    1:account has been forbidden.
+    0: Success.
+    1: Account has been forbidden.
+    2: Get characters info failed
+    3: Wrong password or account.
+    4: Missing data
+    5: No account available.
     '''
     def __init__(self, errinfo,errcode):
         self.errinfo = errinfo
@@ -149,11 +139,9 @@ class MyError(Exception):
 class MainWindow(QMainWindow):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.t = Thread(target=runapp)
         self.launcher = Launcher()
         self.getter = Getter()
         self.accessor = Accessor()
-        self.t.start()
         self.setWindowTitle('原神')
         self.setGeometry(300, 300, 640, 400)
         self.widget = QWidget()
@@ -212,7 +200,7 @@ class MainWindow(QMainWindow):
         with open('./data/ch_id.txt', encoding='UTF-8') as f:
             ch_id = f.readlines()
         for c in ch_id:
-            name = c[17:].strip('\'').strip()
+            name = c[17:].strip()
             ch[name] = self.accessor.read('character','ID' + c[3:11])
         date = time.strftime("%Y%m%d", time.localtime())
         pd.DataFrame(ch).to_csv('./data/result_{}.csv'.format(date), encoding='utf_8_sig')
@@ -232,25 +220,25 @@ class MainWindow(QMainWindow):
         with open(idlistpath) as f:
             self.role_list = f.readlines()
         global gee_result, isreloaded
-        self.info_ch = '1'
         isreloaded = False
         gee_result = {}
+        self.info_ch = {}
         self.cookie_token = ''
         self.account_info = ''
-        self.timer = QTimer(self)  # 初始化一个定时器
-        self.timer.timeout.connect(self.operate)  # 计时结束调用operate()方法
-        self.timer.start(1000)  # 设置计时间隔并启动
+        self.timer = QTimer(self)  
+        self.timer.timeout.connect(self.operate)  
+        self.timer.start(1000)  
 
     def start_get_timer(self):
         with open(idlistpath) as f:
             line = f.readlines()[-1]
-            self.role_id = int(line.strip('\''))
+            self.role_id = int(line.strip())
         global gee_result, isreloaded
         gee_result = {}
+        isreloaded = False
         self.cookie_token = ''
         self.account_info = ''
-        self.info_ch = '1'
-        isreloaded = False
+        self.info_ch = {}
         self.timer = QTimer(self)  
         self.timer.timeout.connect(self.operate_get)  
         self.timer.start(1000) 
@@ -335,7 +323,7 @@ class MainWindow(QMainWindow):
                 isreloaded = False
                 return
         self.setgetting()
-        role_id = self.role_list[0].strip('\'').strip()
+        role_id = self.role_list[0].strip()
         try:
             self.info_ch = self.getter.get_chars_byid(role_id)
         except MyError as e:
@@ -344,15 +332,15 @@ class MainWindow(QMainWindow):
                 isreloaded = False
                 self.getter.clear_info()
                 return
-            #暂时不处理
             if e.errinfo == MESSAGE['Not_logged_in']:
                 with open('./data/account.txt', 'r+') as f:
                     accounts = f.readlines()
                     line = ''
                     for a in enumerate(accounts):
                         acc = a[1].split(' ')
-                        acc[-1] = acc[-1].strip()
-                        if acc[0] ==self.launcher.account:
+                        if len(acc) <= 2:
+                            continue
+                        if self.getter.account_id == acc[2]:
                             line = "{} {}\n".format(acc[0],acc[1])
                             accounts[a[0]] = line
                     f.seek(0)
@@ -376,10 +364,14 @@ class MainWindow(QMainWindow):
     def operate_get(self):
         global gee_result, isreloaded
         path = './data/account.txt'
-        
         if self.getter.isempty and self.launcher.isempty:
             with open(path) as f:
                 acc_pass = f.readlines()[0].strip().split(' ')
+                if len(acc_pass) <= 1:
+                    reply = QMessageBox.information(self, '警告',  '无可用账户',  QMessageBox.Yes)
+                    self.initview()
+                    self.timer.stop()
+                    return
             if len(acc_pass) >= 4:
                 account_id = acc_pass[2].strip()
                 weblogin_token = acc_pass[3].strip()
@@ -413,15 +405,11 @@ class MainWindow(QMainWindow):
         self.setgetting()  
         self.role_id += random.randint(0, 100)
         try:
-            #self.info_ch = self.getter.get_chars_byid(self.role_id)
             player = self.getter.get_player(self.role_id)
             self.accessor.add(player)
-            #insert(self.info_ch, self.role_id)
         except MyError as e:
-            
             if e.errinfo == MESSAGE['Data_not_public']:
                return
-            #暂时不处理
             if e.errinfo == MESSAGE['Not_logged_in']:
                 with open('./data/account.txt', 'r+') as f:
                     accounts = f.readlines()
@@ -447,51 +435,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e):
         self.accessor.save()
-        #os._exit(0)
-
-    '''def get_account(self):
-        path = './data/account.{}'.format(
-            time.strftime("%Y%m%d", time.localtime()))
-        if not os.path.exists(path):
-            with open(path, 'a+') as f:
-                with open('./data/account.txt') as f2:
-                    accounts = f2.readlines()
-                    if len(accounts) == 0:
-                        reply = QMessageBox.information(
-                            self, "警告",  "无可用账户！",  QMessageBox.Yes)
-                        os._exit(0)
-                    acc = accounts[-1]
-                    accounts.remove(acc)
-                    f.writelines(accounts)
-                    return acc.split(' ')
-        else:
-            try:
-                f = open(path, 'r+')
-                accounts = f.readlines()
-                if len(accounts) == 0:
-                    self.timer.stop()
-                    self.initview()
-                    reply = QMessageBox.information(
-                    self, "警告",  "今日账户查看次数已全部用完,重新读取account",  QMessageBox.Yes)
-                    f.close()
-                    os.remove(path)
-                    acc = self.get_account()
-                    return acc
-                acc = accounts[0]
-                accounts.remove(acc)
-                f.seek(0)
-                f.truncate()
-                f.writelines(accounts)
-                f.close()
-                acc = acc.split(' ')
-                acc[-1] = acc[-1].strip()
-                return acc
-            except:
-                f.close()
-                raise Exception'''
-
+        
 class Dialog(QMainWindow):
-
     def __init__(self, parent=None):
         super(Dialog, self).__init__(parent)
         self.setGeometry(300, 300, 640, 400)
@@ -503,14 +448,12 @@ class Dialog(QMainWindow):
         self.layout.addWidget(label_getting)
         self.setWindowTitle("error")
         self.setWindowModality(Qt.ApplicationModal)
-
 #登录器
 class Launcher(object):
     def __init__(self):
         self.account = ''
         self.password = ''
         self.isempty = True
-    
 
     def rsa_encrypt(self, message):
         publickey = '''-----BEGIN PUBLIC KEY-----
@@ -526,41 +469,26 @@ class Launcher(object):
     def get_cookie(self, ticket, account_id):
         t = time.time()
         t = int(round(t * 1000))
-        url = 'https://webapi.account.mihoyo.com/Api/cookie_accountinfo_by_loginticket?login_ticket={}&t={}'.format(
-            ticket, t)
-        header = {
-            'Host': 'webapi.account.mihoyo.com',
-            'Connection': 'keep-alive',
-            'Accept': 'application/json, text/plain, */*',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Safari/537.36 Edg/87.0.664.75',
-            'Origin': 'https://bbs.mihoyo.com',
-            'Sec-Fetch-Site': 'same-site',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Dest': 'empty',
-            'Referer': 'https://bbs.mihoyo.com/',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
-        }
+        url = get_url('cookie_url', ticket, t)
         cookie = '_ga=GA1.2.315542037.1607442735; UM_distinctid=176430da7561cd-0f9974eb924088-5a301348-144000-176430da75731c;\
             mi18nLang=zh-cn;_gid=GA1.2.153888793.1610692678; login_uid={}; login_ticket={}'.format(account_id, ticket)
-        referer = 'https://bbs.mihoyo.com/'
-        header = get_headers(cookie,referer)
+        header = get_headers(cookie,REFERER[1])
         g = self.myrequests('get',url,header)
         return g.json()['data']['cookie_info']['cookie_token']
 
-    def myrequests(self, type, url, headers, data='', proxies=''):
+    def myrequests(self, type_, url, headers, data='', proxies=''):
         if proxies == '':
             proxy = getproxy()
         else:
             proxy = proxies
-        if type == 'get':
+        if type_ == 'get':
             try:
                 r = requests.get(url, headers=headers, proxies=proxy,
                         verify=False, timeout=2)
             except requests.exceptions.ProxyError:
                 r = requests.get(url, headers=headers,
                         verify=False, timeout=2)
-        if type == 'post':
+        if type_ == 'post':
             try:
                 r = requests.post(url, data=data, headers=headers,
                         proxies=proxy, verify=False, timeout=2)
@@ -580,9 +508,8 @@ class Launcher(object):
         self.isempty = True
     
     def login(self):
-        #'Cookie': '_ga=GA1.2.315542037.1607442735; UM_distinctid=176430da7561cd-0f9974eb924088-5a301348-144000-176430da75731c; mi18nLang=zh-cn; _gid=GA1.2.153888793.1610692678',
         header = get_headers(type_='login')
-        url = 'https://webapi.account.mihoyo.com/Api/login_by_password'
+        url = get_url('login_url')
         data = 'is_bh2=false&account={}&password={}&mmt_key={}&is_crypto=true&geetest_challenge={}&geetest_validate={}&geetest_seccode={}'
         password_rsa = self.rsa_encrypt(self.password)
         password_rsa = parse.quote(password_rsa)
@@ -638,30 +565,20 @@ class Getter(object):
         self.isempty = True
     
     def get_chars(self, role_id):
-        ''' cookie = '_ga=GA1.2.714820049.1611191469;_ga_E36KSL9TFE=GS1.1.1611312802.1.1.1611312811.0;\
-            UM_distinctid=1771f5c168b518-0494a3f435287a-7d677965-144000-1771f5c168c6fe; mi18nLang=zh-cn;\
-            MHYUUID=598b478b-aee1-4aa0-8f79-4db508976b4d;aliyungf_tc=b739dca2c0ca7729e29bbea65e89f7a9f73cf9aebfdebbdbbad60b00d507243b;\
-            _gid=GA1.2.153888793.1610692678; login_uid={}; login_ticket={}; account_id={}; cookie_token={};\
-            ltoken=2vhVuLT1aElUzxcT9UYsvuDBLRA0IorNZG6vRvVf; ltuid={}; _gat=1'.format(self.account_id, self.login_ticket, self.account_id, self.cookie_token, self.account_id)'''
-        
-        referer = 'https://webstatic.mihoyo.com/'
-        header = get_headers(self.cookie, referer)
-        url = 'https://api-takumi.mihoyo.com/game_record/genshin/api/index?server=cn_gf01&role_id={0}'.format(
-            role_id)
+        header = get_headers(self.cookie, REFERER[0])
+        url = get_url('get_chars_url',role_id)
         g = self.myrequests('get',url,header)
         return g.json()
-
+    
     def get_abyss(self,role_id,type_):
-        referer = 'https://webstatic.mihoyo.com/'
-        header = get_headers(self.cookie,referer)
-        url = 'https://api-takumi.mihoyo.com/game_record/genshin/api/spiralAbyss?schedule_type={}&server=cn_gf01&role_id={}'.format(type_,role_id)
+        header = get_headers(self.cookie,REFERER[0])
+        url = get_url('get_abyss_url',type_, role_id)
         g = self.myrequests('get',url,header)
         return g.json()['data']
 
     def post_chars(self, data):
-        referer = 'https://webstatic.mihoyo.com/'
-        header = get_headers(self.cookie, referer)
-        url = 'https://api-takumi.mihoyo.com/game_record/genshin/api/character'
+        header = get_headers(self.cookie, REFERER[0])
+        url = get_url('post_chars_url')
         p = self.myrequests('post',url,header,data=data)
         return p.json()
 
@@ -669,11 +586,11 @@ class Getter(object):
         if self.isempty:
             raise MyError('Getter data is empty', ERRCODE['MissingData'])
         g = self.get_chars(role_id)
-        if g['message'] == 'You can access the genshin game records of up to 30 other people':
+        if g['retcode'] == 10101:
             raise MyError(MESSAGE['Run_out_of_times'],ERRCODE['GetCharsInfoFailed'])
-        if g['message'] == 'Data is not public for the user':
+        if g['retcode'] == 10102:
             raise MyError(MESSAGE['Data_not_public'],ERRCODE['GetCharsInfoFailed'])
-        if g['message'] == 'Please login':
+        if g['retcode'] == 10001:
             raise MyError(MESSAGE['Not_logged_in'],ERRCODE['GetCharsInfoFailed'])
         chars = []
         character_ids = ''
@@ -770,12 +687,9 @@ class Accessor(object):
             chars = player.characters
             for x in chars.keys():
                 cl += ', ID{0}' .format(str(x))
-                #cl = str(x)
                 values += ',' + '"' + str(chars[x]) + '"'
-                #values = '"' + str(chars[x]) + '"'
             sql = 'INSERT INTO User ({0}) VALUES ({1})'.format(cl, values)
             self.cursor.execute(sql)
-            
             end_time = ''
             for x in enumerate(player.abyss.values()):
                 values = json.dumps(x[1])
@@ -795,6 +709,7 @@ class Accessor(object):
             return fates
         if type_ == 'abyss':
             pass
+
 class Player(object):
     def __init__(self, role_id):
         self._role_id = role_id
@@ -873,7 +788,8 @@ def success():
 
 if __name__ == "__main__":
     try: 
-        t = Thread(target=runapp)
+        app.secret_key = "www"
+        t = Thread(target=app.run)
         t.start()
         qapp = QApplication(sys.argv)
         browser = MainWindow()
