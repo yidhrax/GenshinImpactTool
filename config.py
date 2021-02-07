@@ -1,6 +1,8 @@
 class Config:
     USER_AGENT = ''
     APP_VERSION = '2.3.0'
+    IDLIST_PATH = './data/idlist.txt'
+    ACCOUNT_PATH = './data/account.txt'
     URL = {
         'mmt_url': 'https://webapi.account.mihoyo.com/Api/create_mmt?scene_type=1&now={}&reason=bbs.mihoyo.com',
         'cookie_url' : 'https://webapi.account.mihoyo.com/Api/cookie_accountinfo_by_loginticket?login_ticket={}&t={}',

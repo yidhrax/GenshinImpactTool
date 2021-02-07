@@ -28,7 +28,7 @@ import uuid
 import string
 
 characters = range(10000001, 10000070)
-idlistpath = './data/idlist.txt'
+
 gee_result = {}
 mmt_key = ''
 isreloaded = False 
@@ -43,6 +43,8 @@ ERRCODE = {
     'WrongPassword' : 3,
     'MissingData' : 4,
     'Noaccountavailable' : 5,
+    'Emptycaptcha' : 6,
+    'Unknownretcode' : 7,
 }
 
 MESSAGE = {
@@ -86,7 +88,7 @@ def get_headers(cookie='', referer='', type_=None):
                 'x-rpc-client_type': '5',
                 'x-rpc-app_version': CONFIG.APP_VERSION,
                 'DS': get_ds(),
-                'User-Agent': CONFIG.USER_AGENT,
+                'YS-Agent': CONFIG.USER_AGENT,
                 'Referer': referer, 
                 'Accept-Encoding': 'gzip, deflate, br',
                 'Cookie': cookie
@@ -97,7 +99,7 @@ def get_headers(cookie='', referer='', type_=None):
             'Connection': 'keep-alive',
             'Content-Length': '460',
             'Accept': 'application/json, text/plain, */*',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Safari/537.36 Edg/87.0.664.75',
+            'YS-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Safari/537.36 Edg/87.0.664.75',
             'Content-Type': 'application/x-www-form-urlencoded',
             'Origin': 'https://bbs.mihoyo.com',
             'Sec-Fetch-Site': 'same-site',
@@ -139,30 +141,35 @@ class MyError(Exception):
 class MainWindow(QMainWindow):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.launcher = Launcher()
-        self.getter = Getter()
+        self.VIEW = {'initview' : 1, 'webview' : 2, 'getting' : 3}
+        self.view = 0
         self.accessor = Accessor()
+        self.getter = Getter(self.accessor.read('role_id'))
+        self.launcher = Launcher(CONFIG.ACCOUNT_PATH + '.' + str(time.strftime("%Y%m%d", time.localtime())))
         self.setWindowTitle('原神')
         self.setGeometry(300, 300, 640, 400)
         self.widget = QWidget()
         self.layout = QHBoxLayout(self)
         self.initview()
+        self.widget.setLayout(self.layout)
+        self.setCentralWidget(self.widget)
         self.show()
 
     def setwebview(self):
-        if self.iswebwiew:
+        if self.view == self.VIEW['webview']:
             return
         for i in range(self.layout.count()):
             self.layout.itemAt(i).widget().deleteLater()
         self.webview = QWebEngineView()
         self.webview.load(QUrl("httP://127.0.0.1:5000"))
         self.layout.addWidget(self.webview)
-        self.iswebwiew = True
+        self.view = self.VIEW['webview']
 
     def setgetting(self):
+        if self.view == self.VIEW['getting']:
+            return
         for i in range(self.layout.count()):
             self.layout.itemAt(i).widget().deleteLater()
-        self.iswebwiew = False
         label_getting=QLabel(self)
         label_getting.setText('正在获取数据...')
         label_getting.setAlignment(Qt.AlignCenter)
@@ -171,25 +178,21 @@ class MainWindow(QMainWindow):
         button_stop.clicked.connect(self.stop_button_clicked)
         self.layout.addWidget(label_getting)
         self.layout.addWidget(button_stop)
+        self.view = self.VIEW['getting']
 
     def initview(self):
+        if self.view == self.VIEW['initview']:
+            return
         for i in range(self.layout.count()):
             self.layout.itemAt(i).widget().deleteLater()
-        self.iswebwiew = False
-        self.launcher.clear_info()
         self.getter.clear_info()
-        self.acc_pass = ''
         self.start_button = QPushButton("开始获取数据")
         self.start_button.clicked.connect(self.start_button_clicked)
         self.dl_button = QPushButton("下载角色数据")
         self.dl_button.clicked.connect(self.dl_button_clicked)
-        self.get_button = QPushButton("获取可用id")
-        self.get_button.clicked.connect(self.get_button_clicked)
         self.layout.addWidget(self.start_button)
         self.layout.addWidget(self.dl_button)
-        self.layout.addWidget(self.get_button)
-        self.widget.setLayout(self.layout)
-        self.setCentralWidget(self.widget)
+        self.view = self.VIEW['initview']
 
     def start_button_clicked(self):
         self.start_timer()
@@ -206,133 +209,51 @@ class MainWindow(QMainWindow):
         pd.DataFrame(ch).to_csv('./data/result_{}.csv'.format(date), encoding='utf_8_sig')
         reply = QMessageBox.information(
                             self, "完成",  "下载完成！",  QMessageBox.Yes)
-                
-    def get_button_clicked(self):
-        self.start_get_timer()
-        self.setgetting()
-
+        
     def stop_button_clicked(self):
         self.timer.stop()
         self.initview()
         self.accessor.save()
 
     def start_timer(self):
-        with open(idlistpath) as f:
-            self.role_list = f.readlines()
-        global gee_result, isreloaded
-        isreloaded = False
+        global gee_result
         gee_result = {}
-        self.info_ch = {}
-        self.cookie_token = ''
-        self.account_info = ''
         self.timer = QTimer(self)  
         self.timer.timeout.connect(self.operate)  
         self.timer.start(1000)  
 
-    def start_get_timer(self):
-        with open(idlistpath) as f:
-            line = f.readlines()[-1]
-            self.role_id = int(line.strip())
-        global gee_result, isreloaded
-        gee_result = {}
-        isreloaded = False
-        self.cookie_token = ''
-        self.account_info = ''
-        self.info_ch = {}
-        self.timer = QTimer(self)  
-        self.timer.timeout.connect(self.operate_get)  
-        self.timer.start(1000) 
-
-    def get_account(self):
-        path = './data/account.{}'.format(
-            time.strftime("%Y%m%d", time.localtime()))
-        if not os.path.exists(path):
-            with open(path, 'a+') as f:
-                with open('./data/account.txt') as f2:
-                    self.accounts = f2.readlines()
-                    if len(self.accounts) == 0:
-                        reply = QMessageBox.information(
-                            self, "警告",  "无可用账户！",  QMessageBox.Yes)
-                        os._exit(0)
-                    while '' in self.accounts:
-                        self.accounts.remove('')
-                    acc = self.accounts[-1]
-                    self.accounts.remove(acc)
-                    f.writelines(self.accounts)
-                    return acc.split(' ')
-        else:
-            try:
-                f = open(path, 'r+')
-                self.accounts = f.readlines()
-                if len(self.accounts) == 0:
-                    reply = QMessageBox.information(
-                    self, "警告",  "今日账户查看次数已全部用完,重新读取account",  QMessageBox.Yes)
-                    f.close()
-                    os.remove(path)
-                    acc = self.get_account()
-                    return acc
-                acc = self.accounts[0]
-                self.accounts.remove(acc)
-                f.seek(0)
-                f.truncate()
-                f.writelines(self.accounts)
-                f.close()
-                acc = acc.split(' ')
-                acc[-1] = acc[-1].strip()
-                return acc
-            except:
-                f.close()
-                raise Exception
-
     def operate(self):
-        if len(self.role_list) <= 10:
-            reply = QMessageBox.information(
-                self, "警告",  "可用id不足",  QMessageBox.Yes)
-            self.initview()
-            self.timer.stop()
-            return
-        if self.getter.isempty and self.launcher.isempty:
-            acc_pass = self.get_account()
-            if len(acc_pass) >= 4:
-                account_id = acc_pass[2].strip()
-                weblogin_token = acc_pass[3].strip()
-                cookie_token = acc_pass[4].strip()
-                self.getter.set_info(cookie_token, weblogin_token, account_id)
-            else:
-                self.launcher.set_info(acc_pass[0],acc_pass[1])
-                
-        global isreloaded, gee_result
-        if not self.launcher.isempty:
-            if not isreloaded:
-                self.setwebview()
-                isreloaded = True
-                return
-            if gee_result == {}:
-                return
+        global gee_result
+        if self.getter.isempty:
             try:
                 account_info = self.launcher.login()
-                login_ticket = account_info['weblogin_token']
-                account_id = account_info['account_id']
-                cookie_token = account_info['cookie_token']
-                self.getter.set_info(cookie_token,login_ticket, account_id)
             except MyError as e:
-                reply = QMessageBox.information(self, "警告",  e.errinfo,  QMessageBox.Yes)
-                self.launcher.clear_info()
-                self.getter.clear_info()
-                gee_result = {}
-                isreloaded = False
+                if e.errcode == ERRCODE['Emptycaptcha']:
+                    self.setwebview()
+                elif e.errcode == ERRCODE['Noaccountavailable']:
+                    reply = QMessageBox.information(self, "警告",  e.errinfo,  QMessageBox.Yes)
+                    self.timer.stop()
+                    self.initview()
+                else:
+                    reply = QMessageBox.information(self, "警告",  e.errinfo,  QMessageBox.Yes)
+                    self.launcher.remove_account()
                 return
+            login_ticket = account_info['weblogin_token']
+            account_id = account_info['account_id']
+            cookie_token = account_info['cookie_token']
+            self.getter.set_info(cookie_token,login_ticket, account_id)
         self.setgetting()
-        role_id = self.role_list[0].strip()
         try:
-            self.info_ch = self.getter.get_chars_byid(role_id)
+            player = self.getter.get_player()
         except MyError as e:
             if e.errinfo == MESSAGE['Run_out_of_times']:
-                gee_result = {}
-                isreloaded = False
                 self.getter.clear_info()
-                return
-            if e.errinfo == MESSAGE['Not_logged_in']:
+                try:
+                    accounts_list = self.launcher.remove_account()
+                except MyError as e:
+                     reply = QMessageBox.information(
+                self, "警告", e.errinfo, QMessageBox.Yes)
+            elif e.errinfo == MESSAGE['Not_logged_in']:
                 with open('./data/account.txt', 'r+') as f:
                     accounts = f.readlines()
                     line = ''
@@ -349,89 +270,13 @@ class MainWindow(QMainWindow):
                 path = './data/account.{}'.format(time.strftime("%Y%m%d", time.localtime()))
                 with open(path, 'a+') as f:
                     f.writelines(line)
-                gee_result = {}
-                isreloaded = False
                 self.getter.clear_info()
-                return
-            if e.errinfo == MESSAGE['Data_not_public']:
-                return
-        player = self.getter.get_player(role_id)
-        self.accessor.add(player)
-        self.role_list.remove(self.role_list[0])
-        with open(idlistpath, 'w+') as f:
-            f.writelines(self.role_list)
-
-    def operate_get(self):
-        global gee_result, isreloaded
-        path = './data/account.txt'
-        if self.getter.isempty and self.launcher.isempty:
-            with open(path) as f:
-                acc_pass = f.readlines()[0].strip().split(' ')
-                if len(acc_pass) <= 1:
-                    reply = QMessageBox.information(self, '警告',  '无可用账户',  QMessageBox.Yes)
-                    self.initview()
-                    self.timer.stop()
-                    return
-            if len(acc_pass) >= 4:
-                account_id = acc_pass[2].strip()
-                weblogin_token = acc_pass[3].strip()
-                cookie_token = acc_pass[4].strip()
-                self.getter.set_info(cookie_token, weblogin_token, account_id)
+            elif e.errinfo == MESSAGE['Data_not_public']:
+                pass
             else:
-                self.launcher.set_info(acc_pass[0],acc_pass[1])
-        if not self.launcher.isempty:
-            if not isreloaded:
-                self.setwebview()
-                isreloaded = True
-                return
-            if gee_result == {}:
-                return
-            try:
-                account_info = self.launcher.login()
-                login_ticket = account_info['weblogin_token']
-                account_id = account_info['account_id']
-                cookie_token = account_info['cookie_token']
-                self.getter.set_info(cookie_token, login_ticket, account_id)
-
-            except MyError as e:
-                reply = QMessageBox.information(self, "警告",  e.errinfo,  QMessageBox.Yes)
-                self.launcher.clear_info()
-                self.getter.clear_info()
-                gee_result = {}
-                isreloaded = False
-                self.setgetting()
-                return
-            
-        self.setgetting()  
-        self.role_id += random.randint(0, 100)
-        try:
-            player = self.getter.get_player(self.role_id)
-            self.accessor.add(player)
-        except MyError as e:
-            if e.errinfo == MESSAGE['Data_not_public']:
-               return
-            if e.errinfo == MESSAGE['Not_logged_in']:
-                with open('./data/account.txt', 'r+') as f:
-                    accounts = f.readlines()
-                    line = ''
-                    for a in enumerate(accounts):
-                        acc = a[1].split(' ')
-                        acc[-1] = acc[-1].strip()
-                        if acc[0] ==self.acc_pass[0]:
-                            line = "{} {}\n".format(acc[0],acc[1])
-                            accounts[a[0]] = line
-                    f.seek(0)
-                    f.truncate()
-                    f.writelines(accounts)
-                path = './data/account.{}'.format(time.strftime("%Y%m%d", time.localtime()))
-                with open(path, 'a+') as f:
-                    f.writelines(line)
-                return
-            
-            if e.errinfo == MESSAGE['Run_out_of_times']:
-                with open(idlistpath, 'a') as f:
-                    f.write(str(self.role_id) + '\n')
-                return
+                print(str(e.errcode)+ ': ' + str(e.errinfo))
+            return
+        self.accessor.add(player)
 
     def closeEvent(self, e):
         self.accessor.save()
@@ -450,11 +295,32 @@ class Dialog(QMainWindow):
         self.setWindowModality(Qt.ApplicationModal)
 #登录器
 class Launcher(object):
-    def __init__(self):
+    def __init__(self,account_path):
         self.account = ''
         self.password = ''
+        self.account_path = account_path
+        self.accounts_list = self.__get_accounts__()
         self.isempty = True
 
+    def __get_accounts__(self):
+        account_path = self.account_path
+        if not os.path.exists(account_path):
+            with open(account_path, 'w+') as f:
+                with open('./data/account.txt') as f2:
+                    accounts = f2.readlines()
+                    while '' in accounts:
+                        accounts.remove('')
+                    if len(accounts) == 0:
+                        raise MyError('无可用账户', ERRCODE['Noaccountavailable'])
+                    f.writelines(accounts)
+        else:
+            with open(account_path) as f:
+                accounts = f.readlines()   
+            if len(accounts) == 0:
+                os.remove(account_path)
+                accounts = self.__get_accounts__()
+        return accounts
+    
     def rsa_encrypt(self, message):
         publickey = '''-----BEGIN PUBLIC KEY-----
                     MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDDvekdPMHN3AYhm/vktJT+YJr7
@@ -465,6 +331,23 @@ class Launcher(object):
         cipher = Cipher_pkcs1_v1_5.new(RSA.importKey(publickey))
         cipher_text = base64.b64encode(cipher.encrypt(message.encode())).decode()
         return cipher_text
+
+    def remove_account(self):
+        self.accounts_list.pop(0)
+        with open(self.account_path,'w+') as f:
+            f.writelines(self.accounts_list)
+
+            
+        return self.accounts_list
+
+    def get_account(self):
+        try:
+            acc_pass = self.accounts_list[0].strip().split(' ')
+        except IndexError:
+            os.remove(self.account_path)
+            self.accounts_list = self.__get_accounts__()
+            raise MyError('今日账户查看次数已全部用完,重新读取account！', ERRCODE['Noaccountavailable'])
+        return acc_pass
 
     def get_cookie(self, ticket, account_id):
         t = time.time()
@@ -501,6 +384,16 @@ class Launcher(object):
         self.account = account
         self.password = password
         self.isempty = False
+        
+    def set_info(self,acc_pass):
+        self.account = acc_pass[0]
+        self.password = acc_pass[1]
+        self.isempty = False
+    
+    def get_info(self,acc_pass):
+        self.account = acc_pass[0]
+        self.password = acc_pass[1]
+        self.isempty = False
     
     def clear_info(self):
         self.account = ''
@@ -508,6 +401,20 @@ class Launcher(object):
         self.isempty = True
     
     def login(self):
+        acc_pass =self.get_account()
+        if len(acc_pass) >= 4:
+            account_id = acc_pass[2].strip()
+            weblogin_token = acc_pass[3].strip()
+            cookie_token = acc_pass[4].strip()
+            return {
+                'account_id' : account_id,
+                'weblogin_token' : weblogin_token,
+                'cookie_token' : cookie_token
+            }
+        global gee_result
+        if {} == gee_result:
+            raise MyError('',ERRCODE['Emptycaptcha'])
+        self.set_info(acc_pass)
         header = get_headers(type_='login')
         url = get_url('login_url')
         data = 'is_bh2=false&account={}&password={}&mmt_key={}&is_crypto=true&geetest_challenge={}&geetest_validate={}&geetest_seccode={}'
@@ -516,6 +423,7 @@ class Launcher(object):
         data = data.format(self.account, password_rsa, mmt_key, gee_result['geetest_challenge'],
                         gee_result['geetest_validate'], gee_result['geetest_seccode'])
         t = self.myrequests('post',url,header,data=data).json()
+        gee_result = {}
         p = t['data']['account_info']
         status = t['data']['status']
         if status == -421:
@@ -541,13 +449,14 @@ class Launcher(object):
         return p
 #获取数据
 class Getter(object):
-    def __init__(self):
+    def __init__(self, bottom_id):
         self.isempty = True
         self.cookie_token = ''
         self.login_ticket = ''
         self.account_id = ''
         self.cookie = ''
-    
+        self.bottom_id = bottom_id
+        
     def set_info(self, cookie_token, login_ticket, account_id):
         self.cookie_token = cookie_token
         self.login_ticket = login_ticket
@@ -556,6 +465,10 @@ class Getter(object):
             _gid=GA1.2.153888793.1610692678; login_uid={}; login_ticket={}; account_id={}; cookie_token={}; \
                 ltoken=2vhVuLT1aElUzxcT9UYsvuDBLRA0IorNZG6vRvVf; ltuid={}; _gat=1'.format(self.account_id, self.login_ticket, self.account_id, self.cookie_token, self.account_id)
         self.isempty = False
+    
+    def get_role_id(self):
+        self.bottom_id +=  random.randint(1, 100)
+        return self.bottom_id
     
     def clear_info(self):
         self.cookie_token = ''
@@ -582,7 +495,7 @@ class Getter(object):
         p = self.myrequests('post',url,header,data=data)
         return p.json()
 
-    def get_chars_byid(self, role_id):
+    def get_player_info(self,role_id):
         if self.isempty:
             raise MyError('Getter data is empty', ERRCODE['MissingData'])
         g = self.get_chars(role_id)
@@ -592,6 +505,8 @@ class Getter(object):
             raise MyError(MESSAGE['Data_not_public'],ERRCODE['GetCharsInfoFailed'])
         if g['retcode'] == 10001:
             raise MyError(MESSAGE['Not_logged_in'],ERRCODE['GetCharsInfoFailed'])
+        if g['retcode'] != 0:
+            raise MyError(g['retcode'],ERRCODE['Unknownretcode'])
         chars = []
         character_ids = ''
         for x in g['data']['avatars']:
@@ -607,9 +522,10 @@ class Getter(object):
             info_all[x['id']] = char_info
         return info_all
 
-    def get_player(self,role_id):
+    def get_player(self):
+        role_id = self.get_role_id()
         player = Player(role_id)
-        player.set_characters = self.get_chars_byid(role_id)
+        player.set_characters = self.get_player_info(role_id)
         player.set_abyss(self.get_abyss(role_id, 1))
         player.set_abyss(self.get_abyss(role_id, 2))
         return player
@@ -661,44 +577,50 @@ class Accessor(object):
         if not os.path.exists('./data/ys.db'):
             conn = sqlite3.connect('./data/ys.db')
             cursor = conn.cursor()
-            sql = 'CREATE TABLE User(role_id)'
+            sql = 'CREATE TABLE YS(role_id)'
+            cursor.execute(sql)
+            sql = 'CREATE UNIQUE INDEX id_index on YS (role_id)'
             cursor.execute(sql)
             for x in characters:
-                sql = 'ALTER TABLE User ADD COLUMN ID{0} TEXT'.format(x)
+                sql = 'ALTER TABLE YS ADD COLUMN ID{0} TEXT'.format(x)
                 cursor.execute(sql)
-            sql = 'ALTER TABLE User ADD COLUMN Abyss1 TEXT'
+            sql = 'ALTER TABLE YS ADD COLUMN Abyss1 TEXT'
             cursor.execute(sql)
-            sql = 'ALTER TABLE User ADD COLUMN Abyss2 TEXT'
+            sql = 'ALTER TABLE YS ADD COLUMN Abyss2 TEXT'
             cursor.execute(sql)
             conn.commit()
             conn.close()
         self.conn = sqlite3.connect('./data/ys.db')
         self.cursor = self.conn.cursor()
+        
     def __del__(self):
         self.conn.commit()
         self.conn.close()
+        
     def save(self):
         self.conn.commit()
+        
     def add(self,player):
         if isinstance(player, Player):
             cl = 'role_id'
             values = str(player.role_id)
-            sql = 'INSERT INTO User ({0}) VALUES ({1})'.format(cl, values)
+            sql = 'INSERT INTO YS ({0}) VALUES ({1})'.format(cl, values)
             chars = player.characters
             for x in chars.keys():
                 cl += ', ID{0}' .format(str(x))
                 values += ',' + '"' + str(chars[x]) + '"'
-            sql = 'INSERT INTO User ({0}) VALUES ({1})'.format(cl, values)
+            sql = 'INSERT INTO YS ({0}) VALUES ({1})'.format(cl, values)
             self.cursor.execute(sql)
             end_time = ''
             for x in enumerate(player.abyss.values()):
                 values = json.dumps(x[1])
-                sql = '''INSERT INTO User ({0}) VALUES ('{1}')'''.format('Abyss' + str(x[0]+1), values)
+                sql = '''INSERT INTO YS ({0}) VALUES ('{1}')'''.format('Abyss' + str(x[0]+1), values)
                 self.cursor.execute(sql)
             self.save()
-    def read(self, type_, parameter):
+        
+    def read(self, type_, parameter = None):
         if type_ == 'character':
-            sql = 'SELECT "{0}" from User'.format(parameter)
+            sql = 'SELECT "{0}" from YS'.format(parameter)
             cursor = self.conn.execute(sql)
             fates = [0, 0, 0, 0, 0, 0, 0]
             for row in cursor:
@@ -709,6 +631,12 @@ class Accessor(object):
             return fates
         if type_ == 'abyss':
             pass
+        if type_ == 'role_id':
+            sql = 'select * from YS order by role_id desc limit 0,1'
+            cursor = self.conn.execute(sql)
+            for row in cursor:
+                return row[0]
+            return 101125314
 
 class Player(object):
     def __init__(self, role_id):
@@ -781,9 +709,8 @@ def start():
 
 @app.route("/success", methods=['POST'])
 def success():
-    data = request.get_json()
-    global gee_result, isreloaded
-    gee_result = data
+    global gee_result
+    gee_result = request.get_json()
     return "success"
 
 if __name__ == "__main__":
