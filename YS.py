@@ -186,9 +186,9 @@ class MainWindow(QMainWindow):
         for i in range(self.layout.count()):
             self.layout.itemAt(i).widget().deleteLater()
         self.getter.clear_info()
-        self.start_button = QPushButton("开始获取数据")
+        self.start_button = QPushButton("开始获取")
         self.start_button.clicked.connect(self.start_button_clicked)
-        self.dl_button = QPushButton("下载角色数据")
+        self.dl_button = QPushButton("导出角色数据")
         self.dl_button.clicked.connect(self.dl_button_clicked)
         self.layout.addWidget(self.start_button)
         self.layout.addWidget(self.dl_button)
@@ -208,7 +208,7 @@ class MainWindow(QMainWindow):
         date = time.strftime("%Y%m%d", time.localtime())
         pd.DataFrame(ch).to_csv('./data/result_{}.csv'.format(date), encoding='utf_8_sig')
         reply = QMessageBox.information(
-                            self, "完成",  "下载完成！",  QMessageBox.Yes)
+                            self, "成功",  "导出成功！",  QMessageBox.Yes)
         
     def stop_button_clicked(self):
         self.timer.stop()
